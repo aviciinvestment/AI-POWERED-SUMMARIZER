@@ -14,7 +14,7 @@ device = 0 if torch.cuda.is_available() else -1
 
 summarizer = pipeline(
     "summarization",
-    model="facebook/bart-large-cnn",
+    model="sshleifer/distilbart-cnn-12-6",
     device=device
 )
 
