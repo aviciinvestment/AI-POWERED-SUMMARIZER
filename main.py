@@ -5,20 +5,24 @@ import torch
 
 app = FastAPI(
     title="AI Summarizer API",
-    description="Text Summarization using BART",
+    description="Text Summarization using DistilBART",
     version="1.0.0"
 )
 
-# Load model once
+# -----------------------
+# MODEL LOAD (IMPORTANT)
+# -----------------------
 device = 0 if torch.cuda.is_available() else -1
 
 summarizer = pipeline(
-    "summarization",
+    task="summarization",
     model="sshleifer/distilbart-cnn-12-6",
     device=device
 )
 
-
+# -----------------------
+# REQUEST MODEL
+# -----------------------
 class SummaryRequest(BaseModel):
     text: str
     max_words: int = Field(
@@ -28,37 +32,38 @@ class SummaryRequest(BaseModel):
         description="Maximum words in final summary"
     )
 
-
+# -----------------------
+# RESPONSE MODEL
+# -----------------------
 class SummaryResponse(BaseModel):
     success: bool
     original_word_count: int
     summary_word_count: int
     summary: str
 
-
+# -----------------------
+# UTILITIES
+# -----------------------
 def chunk_text(text: str, chunk_size: int = 800):
     words = text.split()
-
     for i in range(0, len(words), chunk_size):
         yield " ".join(words[i:i + chunk_size])
 
 
 def truncate_words(text: str, max_words: int):
-    words = text.split()
-    return " ".join(words[:max_words])
+    return " ".join(text.split()[:max_words])
 
-
+# -----------------------
+# ROUTES
+# -----------------------
 @app.get("/")
 def root():
-    return {
-        "message": "AI Summarizer API Running"
-    }
+    return {"message": "AI Summarizer API Running"}
 
-
-@app.post(
-    "/summarize",
-    response_model=SummaryResponse
-)
+# -----------------------
+# SUMMARIZER ENDPOINT
+# -----------------------
+@app.post("/summarize", response_model=SummaryResponse)
 def summarize(request: SummaryRequest):
 
     if not request.text.strip():
@@ -69,37 +74,35 @@ def summarize(request: SummaryRequest):
 
     summaries = []
 
-    # Approximate token conversion
+    # Safe generation limits
     max_length = min(int(request.max_words * 2), 512)
-    min_length = max(int(max_length * 0.5), 30)
-
-    early_stopping=True
+    min_length = max(int(max_length * 0.4), 30)
 
     try:
 
+        # FIRST PASS: chunk summarization
         for chunk in chunk_text(request.text):
 
             result = summarizer(
                 chunk,
                 max_length=max_length,
                 min_length=min_length,
-                do_sample=False
+                do_sample=False,
+                truncation=True
             )
 
-            summaries.append(
-                result[0]["summary_text"]
-            )
+            summaries.append(result[0]["summary_text"])
 
         combined_summary = " ".join(summaries)
 
-        # Second-pass summarization
+        # SECOND PASS (if multiple chunks)
         if len(summaries) > 1:
-
             result = summarizer(
                 combined_summary,
                 max_length=max_length,
                 min_length=min_length,
-                do_sample=False
+                do_sample=False,
+                truncation=True
             )
 
             combined_summary = result[0]["summary_text"]
@@ -111,12 +114,8 @@ def summarize(request: SummaryRequest):
 
         return SummaryResponse(
             success=True,
-            original_word_count=len(
-                request.text.split()
-            ),
-            summary_word_count=len(
-                final_summary.split()
-            ),
+            original_word_count=len(request.text.split()),
+            summary_word_count=len(final_summary.split()),
             summary=final_summary
         )
 
